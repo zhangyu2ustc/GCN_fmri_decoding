@@ -1,17 +1,21 @@
 
 
-# benchmark of cnn for fmri decoding
-In this project, we attempts to analyze brain imaging data by training the classical deep neural network architectures from scratch. We specificially focused on brain decoding using functional MRI (fMRI). Brain decoding aims to infer cognitive functions from the recorded brain response. Here, we develop a pipeline which takes a short series of fMRI scans as input and predicts the corresponding cognitive states. We mainly tested two DNN architectures, i.e. _**3d-CNN**_ and _**ResNet50**_ 
+# functional decoding using graph convolutional networks on brain graphs
+**Brain graphs** provide a relatively simple way of modeling the human brain connectome by associating nodes with brain regions and defining edges via anatomical or functional connections. Based on this architecture, a non-linear embedding tool, called graph Laplacian, can be used to project the high dimensional brain activities onto subspaces of the graph Laplacian eigenbasis. This method has gained more and more attention in neuroscience studies, for instance identifying functional areas and networks, generating connectivity gradients and harmonics, and even predicting atrophy patterns of dementia. Recently, **graph convolutional networks (GCN)** was proposed, which combines the graph Laplacian theory with deep learning architectures by extending convolution operations onto the graph domain. This approach has shown some promising findings in neuroscience applications, for instance parcellating brain areas and detecting alterations in AD and Autism. In our recent study, we applied GCN to annotate the spatiotemporal dynamics of brain dynamics of human cognitive functions using a short series of fMRI volumes. 
 
 
 ## Introduction
-Comparing to the natural images for which the DNNs are usually designed for, the neuroimaging data are much larger in size, usually in the 4D format: (X, Y, Z, time). This large feature maps bring several challenges when training DNNs. First of all, we need a large dataset to train. But fMRI signals are usually sensitive to the scanning environments. How to generate a universal representations using datasets from multiple centres is still unknown. Here, we decide to use data from one center but consisting of 1200 healthy subjects, scanned for the same task designs. Second, the large feature maps are memory consuming, which is a more serious problem when training and validating the model on GPU processors. To solve this, we propose to training the DNNs directly using CPU processors. 
-#### 3d-CNN
-> Our 3d-CNN achitecture consist of 10 convolutional layers, followed by global pooling and two dense layers. We used stride in convolutional layers instead of using Maxpooling after the convolutional layers in order to save memory. BatchNorm and Dropout was also used in the pipeline. The entire model has **617,238** parameters to train.
-  
+Brain graphs provide a relatively simple way of modeling the human brain connectome, by associating nodes with brain regions, and defining edges via anatomical or functional connections. 
+#### Graph Laplacian
+> Based on this architecture, a non-linear embedding tool, called graph Laplacian, can be used to project the high dimensional brain activities onto subspaces of the graph Laplacian eigenbasis.
+This method has gained more and more attention in neuroscience studies, for instance identifying functional areas and networks, generating connectivity gradients and harmonics, and even predicting atrophy patterns of dementia. 
+#### Graph Convolutional Networks
+> Recently, graph convolutional networks (GCN) was proposed, which combines the graph Laplacian theory with deep learning architectures by extending convolution operations onto the graph domain. 
+> This approach has shown some promising findings in neuroscience applications, for instance parcellating brain areas and detecting alterations in AD and Autism. 
 
-#### ResNet
-> A more complex architecture, e.g. ResNet50, was used, which consist of 50+ convolution layers. There are two types of residual blocks, i.e. identity block, which has the shortcut directly from input to the output, and convolution block, where the input passes convolutional layers first and then sends a shortcut to the output. The residual blocks have been shown to reslove the vanishing gradient problem, which makes the training process much harder especially when DNN goes deeper. Here, we also want test whether the residual blocks will accelerate the training on large-dimensional brain imaging. The entire model has **2,510,742** parameters to train.
+> In our recent study, we applied GCN[1,2] to annotate the spatiotemporal dynamics of brain dynamics of human cognitive functions using a short series of fMRI volumes. 
+I will use this as a case study to illustrate how to apply GCN to brain imaging.
+
 
 
 
@@ -27,4 +31,9 @@ Comparing to the natural images for which the DNNs are usually designed for, the
 
  * ```notebooks/utils.py``` contains helpful functions
 
+
+## References
+<a id="1">[1]</a> Zhang, Yu, and Pierre Bellec. "Functional Decoding using Convolutional Networks on Brain Graphs." 2019 Conference on Cognitive Computational Neuroscience, Berlin, Germany [PDF](https://ccneuro.org/2019/proceedings/0001137.pdf)
+
+<a id="2">[2]</a> Zhang, Yu, and Pierre Bellec. "Functional Annotation of Human Cognitive States using Graph Convolution Networks." 2019 Conference on Neural Information Processing Systems (NeurIPS) Neuro-AI workshop - Real Neurons & Hidden Units, Vancouver, Canada [PDF](https://openreview.net/pdf?id=HJenmmF8Ir)
 
