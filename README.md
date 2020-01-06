@@ -37,7 +37,7 @@ I will use this as a case study to illustrate how to apply GCN to brain imaging.
 
 ## Examples 
 ### Training a decoding model
-The decoding model takes 10s or 15 TRs of fMRI volumes as input and predict the associated task states from 21 experimental conditions. And the model will be trained on 767 subjects, validated on 109 subjects and tested on 219 subjects by running the following command.
+The decoding model takes 10s or 15 TRs of fMRI volumes as input and predicts the associated task states from 21 experimental conditions. And the model will be trained on 767 subjects, validated on 109 subjects and tested on 219 subjects by running the following command.
 ```
 mod='ALL'; blocks=15; 
 python3 -W ignore ./training.py --block_dura=${blocks} --task_modality=${mod}
