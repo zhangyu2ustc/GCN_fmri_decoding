@@ -4,6 +4,9 @@
 ### Ignore all pkl files
 *.pkl
 
+## Ignore all log files
+*.out
+
 ### Ignore folders
 checkpoints/
 train_logs/
