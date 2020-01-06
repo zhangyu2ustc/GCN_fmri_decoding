@@ -23,13 +23,15 @@ I will use this as a case study to illustrate how to apply GCN to brain imaging.
 \
 
 ## Code
- * ```notebooks``` includes all the functions and modules you need for this tutorial
+ * 
 
- * ```notebooks/Tutorials_GCN_practice2_graph-Laplacian_GCN.ipynb``` the main notebook
+ * ```utils.py``` contains useful functions including collecting fMRI data and split it into training, validation and test sets
 
- * ```notebooks/model.py``` contains the model definition, including fully-connected, 1stGCN [1] and ChebyNet [2]
+ * ```model.py``` contains the model definition, including spectral-GCN, 1stGCN [1] and ChebyNet [2]
 
- * ```notebooks/utils.py``` contains helpful functions
+ * ```configure_fmri.py``` contains all default settings for data storage and model specification
+ * ```lib_new``` folder contains three useful functions that have been adapted from the [cnn_graph](https://github.com/mdeff/cnn_graph.git) repo
+ * ```lib_new/checkmat.py``` contains useful functions to save the best model in checkpoint through tensorflow
 
 
 ## References
