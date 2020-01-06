@@ -23,9 +23,9 @@ I will use this as a case study to illustrate how to apply GCN to brain imaging.
 \
 
 ## Codes
- * ```training.py``` to run the model training, by specifying the task domain by **task_modality** and time window by **block_dura**
+ * ```training.py``` to run the model training, by specifying the task domain by _task_modality_ and time window by _block_dura_
  
-  * ```predict_states.py``` to predict the task conditions on test set using pretrained model, by specifying the task domain by **task_modality** and time window by **block_dura**
+  * ```predict_states.py``` to predict the task conditions on test set using pretrained model, by specifying the task domain by _task_modality_ and time window by _block_dura_
 
  * ```utils.py``` contains useful functions including collecting fMRI data and split it into training, validation and test sets
 
