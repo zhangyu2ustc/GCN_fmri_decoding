@@ -36,12 +36,14 @@ import pickle
 import lmdb
 import tensorflow as tf
 from tensorpack.utils.serialize import dumps, loads
+print(tf.__version__)
 
-from lib_new import models, graph, coarsening, utils
+from lib_new import coarsening
+import lib_new.models_gcn as models
 from model import *
 from configure_fmri import *
 
-print('Finish Loading packages!')
+##print('Finish Loading packages!')
 
 
 #####################################
@@ -119,8 +121,7 @@ def bulid_dict_task_modularity(modality):
                    "0bk_places": "place0b_wm",
                    "0bk_tools": "tool0b_wm"}
 
-    dicts = [motor_task_con, lang_task_con, emotion_task_con, gambl_task_con, reson_task_con, social_task_con,
-             wm_task_con]
+    dicts = [motor_task_con, lang_task_con, emotion_task_con, reson_task_con, social_task_con, wm_task_con] ##gambl_task_con,
     from collections import defaultdict
     all_task_con = defaultdict(list)  # uses set to avoid duplicates
     for d in dicts:
@@ -387,7 +388,7 @@ def prepare_fmri_data(pathdata, task_modality, pathout, atlas_name='MMP', test_s
     task_contrasts, modality = bulid_dict_task_modularity(task_modality)
     target_name = np.unique(list(task_contrasts.values()))
     if verbose:
-        print(target_name)
+        print(target_name, len(target_name))
 
     lmdb_filename = pathout + modality + "_" + atlas_name+"_ROI_act_1200R_test_Dec2018_ALL.lmdb" ##Dec2018_ALL
     print("Mapping fmri data to atlas: ", atlas_name)
@@ -398,7 +399,9 @@ def prepare_fmri_data(pathdata, task_modality, pathout, atlas_name='MMP', test_s
         print('%d subjects included in the dataset' % len(subjects_tc_matrix))
         print("one example:", subname_coding[0])
 
-    ev_filename = "_event_labels_1200R_test_Dec2018_ALL_newLR.h5"
+    ev_filename = "_event_labels_1200R_test_Dec2018_ALL_new2.h5"
+    if modality == 'MOTOR' or modality == 'WM' or modality == 'ALLTasks':
+        ev_filename = "_event_labels_1200R_test_Dec2018_ALL_newLR.h5"
     events_all_subjects_file = pathout + modality + ev_filename
     label_matrix, ev_sub_name = load_event_from_h5(events_all_subjects_file,task_contrasts)
     if verbose:
@@ -415,7 +418,7 @@ def prepare_fmri_data(pathdata, task_modality, pathout, atlas_name='MMP', test_s
     return subjects_tc_matrix, label_matrix, modality, target_name, fmri_sub_name
 
 
-def matching_fmri_data_to_trials_event(tc_matrix, label_matrix, target_name, block_dura=15, start_trial=0, hrf_delay=0,
+def matching_fmri_data_to_trials_event(tc_matrix, label_matrix, target_name, fmri_sub_name, block_dura=15, start_trial=0, hrf_delay=0,
                                        flag_event=0, TRstep=1,verbose=1):
 
     #####matching time-series to event design
@@ -424,7 +427,7 @@ def matching_fmri_data_to_trials_event(tc_matrix, label_matrix, target_name, blo
 
     fmri_data_matrix = []
     label_data_matrix = []
-    Trial_dura_pre = 0
+    Trial_dura_pre = 0; Trial_dura = 0
     for subi in range(len(label_matrix)):
         label_trial_data = np.array(label_matrix[subi])
         if hrf_delay > 0:
@@ -441,6 +444,7 @@ def matching_fmri_data_to_trials_event(tc_matrix, label_matrix, target_name, blo
             elif start_trial > 0:
                 condition_mask = np.logical_and(condition_mask_shift, condition_mask)  ##shorter: postpone
 
+        if sum(np.where(condition_mask)[0]) < 1: fmri_sub_name[subi] = []
         ###only extracting the selected task conditions
         tc_matrix_select = np.array(tc_matrix[subi][condition_mask, :])
         label_data_select = np.array(label_trial_data[condition_mask])
@@ -484,7 +488,8 @@ def matching_fmri_data_to_trials_event(tc_matrix, label_matrix, target_name, blo
         for dura,ti in zip(trial_duras,range(len(trial_duras))):
             trial_num_used = dura // block_dura_used * block_dura_used
             if trial_num_used < block_dura_used:
-                print('\nTask design contains shorter trials:{}! You need to re-consider the block-dura: {} \n'.format(Trial_dura,block_dura_used))
+                #print('\nTask design contains shorter trials:{}! You need to re-consider the block-dura: {} \n'.format(Trial_dura,block_dura_used))
+                if trial_num_used < 1: trial_num_used = dura
                 xx = fmri_data_block[ti][:trial_num_used, :]
                 xx2 = xx.take(range(0, block_dura_used), axis=0, mode='clip')  ##'warp'
                 fmri_data_block_new.append(np.expand_dims(xx2,axis=0))
@@ -497,7 +502,7 @@ def matching_fmri_data_to_trials_event(tc_matrix, label_matrix, target_name, blo
         try:
             fmri_data_block_new2 = np.array(np.vstack(fmri_data_block_new)).transpose(0, 2, 1).astype('float32',casting='same_kind')
         except:
-            print('\nTask design contains some shorter trials:{}! You need to re-consider the block-dura values: {} \n'.format(Trial_dura,block_dura))
+            print('\nTask design contains some shorter trials:{}! You need to re-consider the block-dura values: {}'.format(Trial_dura,block_dura))
             xx = np.array(np.vstack(fmri_data_block_new)).transpose(0, 2, 1)
             fmri_data_block_new2 = xx.take(range(0, block_dura_used), axis=-1, mode='clip').astype('float32',casting='same_kind')
         fmri_data_block = []; fmri_data_block_new = []
@@ -513,56 +518,53 @@ def matching_fmri_data_to_trials_event(tc_matrix, label_matrix, target_name, blo
     if TRstep > 1:
         fmri_data_matrix = np.array(np.array_split(fmri_data_matrix, TRstep, axis=-1)).mean(axis=0)
     print("fmri/event data shape after matching trials:", fmri_data_matrix.shape, label_data_matrix.shape)
+    fmri_sub_name = list(filter(None, fmri_sub_name))
 
-    return fmri_data_matrix, label_data_matrix
+    return fmri_data_matrix, label_data_matrix, fmri_sub_name, Trial_dura
 
-
-def subject_split_trials_event(tc_matrix, label_matrix, fmri_sub_name, target_name, block_dura=15, sub_num=None, sampling=0,
+def scan_split_trials_event(tc_matrix, label_matrix, fmri_sub_name, target_name, block_dura=15, sub_num=None, sampling=0,
                                test_size=0.2, val_size=0.1, randomseed=123, verbose=1):
     ################################################################################
     ########spliting into train,val and testing
     Subject_Num = len(tc_matrix)
     rs = np.random.RandomState(randomseed)
     if not sub_num or sub_num > Subject_Num:
-        sub_num = Subject_Num
+        test_sub_num = Subject_Num
+    else:
+        test_sub_num = sub_num
 
     subjects = [sub.split("_")[0] for sub in fmri_sub_name]
-    ##print(subjects)
-    subjects_unique = np.unique(subjects)
-    test_sub_num = len(subjects_unique)
+    print("Remaining {} functional scans of {} subjects".format(len(subjects), len(np.unique(subjects))))
 
     np.random.seed(randseed)
     subjectList = np.random.permutation(range(test_sub_num))
     subjectTest = int(test_size*test_sub_num)
     train_sid_tmp = subjectList[:test_sub_num-subjectTest]
     test_sid = subjectList[-subjectTest:]
-
-    ##convert from subject index to file index
-    ##test set
-    test_file_sid = [si for si,sub in enumerate(subjects) if sub in subjects_unique[test_sid]]
-    fmri_data_test = np.array([tc_matrix[i] for i in test_file_sid])
-    label_data_test = [label_matrix[i] for i in test_file_sid]
-    ##print(fmri_data_test.shape, np.array(label_data_test).shape )
-
+    testset_subjects = subjects[test_sid]
     ##validation and training sets
     subjectList = np.random.permutation(train_sid_tmp)
     subjectVal = int(val_size * test_sub_num)
     train_sid = subjectList[: test_sub_num-subjectVal-subjectTest]
     val_sid = subjectList[-subjectVal:]
 
+    ##test set
+    fmri_data_test = np.array([tc_matrix[i] for i in test_sid])
+    label_data_test = [label_matrix[i] for i in test_sid]
+    ##print(fmri_data_test.shape, np.array(label_data_test).shape )
     ##train
-    train_file_sid = [si for si, sub in enumerate(subjects) if sub in subjects_unique[train_sid]]
-    fmri_data_train = np.array([tc_matrix[i] for i in train_file_sid])
-    label_data_train = [label_matrix[i] for i in train_file_sid]
+    fmri_data_train = np.array([tc_matrix[i] for i in train_sid])
+    label_data_train = [label_matrix[i] for i in train_sid]
     ##val
-    val_file_sid = [si for si, sub in enumerate(subjects) if sub in subjects_unique[val_sid]]
-    fmri_data_val = np.array([tc_matrix[i] for i in val_file_sid])
-    label_data_val = [label_matrix[i] for i in val_file_sid]
+    fmri_data_val = np.array([tc_matrix[i] for i in val_sid])
+    label_data_val = [label_matrix[i] for i in val_sid]
     ##print(fmri_data_train.shape, np.array(label_data_train).shape)
 
     if verbose:
-        print('\nStep 5: Training the model on {} subjects with {} fmri scans and validated on {} subjects with {} fmri scans'
-              .format(len(train_sid), len(train_file_sid), len(val_sid), len(val_file_sid)))
+        print('\nStep 5: Training the model {} fmri scans and validated on {} fmri scans'
+              .format(len(train_sid), len(val_sid)))
+        print('training on {} subjects, validated on {} subjects and testing on {} subjects'
+              .format(len(train_sid), len(val_sid), len(test_sid)))
         print("in total of {} subjects and {} functional scans".format(len(np.unique(subjects)), len(subjects)))
     #############################################
     ###transform the data
@@ -576,10 +578,6 @@ def subject_split_trials_event(tc_matrix, label_matrix, fmri_sub_name, target_na
     Y_test = le.transform(np.block(label_data_test)) ##.astype('uint8')
     print("data shape for test set:", X_test.shape,Y_test.shape)
 
-    X_train_scaled = []
-    X_val_scaled = []
-    Y_train_scaled = []
-    Y_val_scaled = []
     ##preprocess features and labels
     train_sid = np.random.permutation(range(len(label_data_train)))
     X = np.array(np.vstack([fmri_data_train[i] for i in train_sid]))   ##using vstack or hstack
@@ -587,6 +585,8 @@ def subject_split_trials_event(tc_matrix, label_matrix, fmri_sub_name, target_na
     #########################################sampling
     trial_class_counts = Counter(Y)
     print(trial_class_counts)
+
+    ###for the unbalanced classes, using different sampling stradige
     if sampling > 0:
         Y_new = []; X_new = [];
         for trial_class, trial_count in trial_class_counts.items():
@@ -640,29 +640,172 @@ def subject_split_trials_event(tc_matrix, label_matrix, fmri_sub_name, target_na
     print("data shape for training set:", X_train_scaled.shape,Y_train_scaled.shape)
 
     val_sid = np.random.permutation(range(len(label_data_val)))
-    X = np.array(np.vstack([fmri_data_train[i] for i in val_sid]))
-    Y = np.array(np.block([label_data_train[i] for i in val_sid]))
+    X = np.array(np.vstack([fmri_data_val[i] for i in val_sid]))
+    Y = np.array(np.block([label_data_val[i] for i in val_sid]))
     # print('fmri and label data for validation:',X.shape, Y.shape)
     X_val_scaled = np.array(scaler.transform(X))
     Y_val_scaled = le.transform(Y)
     print("data shape for validation set:", X_val_scaled.shape,Y_val_scaled.shape)
 
     print('Samples size for training: %d and testing %d and validating %d with %d classes' % (len(Y_train_scaled), len(Y_test), len(Y_val_scaled), nb_class))
-    return X_train_scaled, Y_train_scaled, X_val_scaled, Y_val_scaled, X_test, Y_test
+    return X_train_scaled, Y_train_scaled, X_val_scaled, Y_val_scaled, X_test, Y_test, testset_subjects
 
 
+def subject_split_trials_event(tc_matrix, label_matrix, fmri_sub_name, target_name, block_dura=15, sub_num=None, sampling=0,
+                               test_size=0.2, val_size=0.1, randomseed=123, verbose=1):
+    ################################################################################
+    ########spliting into train,val and testing
+    Subject_Num = len(tc_matrix)
+    rs = np.random.RandomState(randomseed)
+    if not sub_num or sub_num > Subject_Num:
+        sub_num = Subject_Num
+
+    subjects = [sub.split("_")[0] for sub in fmri_sub_name]
+    subjects_unique = np.unique(subjects)
+    test_sub_num = len(subjects_unique)
+    print("Remaining {} functional scans of {} subjects".format(len(subjects), len(np.unique(subjects))))
+
+    np.random.seed(randseed)
+    subjectList = np.random.permutation(range(test_sub_num))
+    subjectTest = int(test_size*test_sub_num)
+    train_sid_tmp = subjectList[:test_sub_num-subjectTest]
+    test_sid = subjectList[-subjectTest:]
+    testset_subjects = subjects_unique[test_sid]
+
+    ##convert from subject index to file index
+    ##test set
+    test_file_sid = [si for si,sub in enumerate(subjects) if sub in subjects_unique[test_sid]]
+    print(np.array(tc_matrix).shape,len(label_matrix))
+    fmri_data_test = np.array([tc_matrix[i] for i in test_file_sid])
+    label_data_test = [label_matrix[i] for i in test_file_sid]
+    ##print(fmri_data_test.shape, np.array(label_data_test).shape )
+
+    ##validation and training sets
+    subjectList = np.random.permutation(train_sid_tmp)
+    subjectVal = int(val_size * test_sub_num)
+    train_sid = subjectList[: test_sub_num-subjectVal-subjectTest]
+    val_sid = subjectList[-subjectVal:]
+
+    ##train
+    train_file_sid = [si for si, sub in enumerate(subjects) if sub in subjects_unique[train_sid]]
+    fmri_data_train = np.array([tc_matrix[i] for i in train_file_sid])
+    label_data_train = [label_matrix[i] for i in train_file_sid]
+    ##val
+    val_file_sid = [si for si, sub in enumerate(subjects) if sub in subjects_unique[val_sid]]
+    fmri_data_val = np.array([tc_matrix[i] for i in val_file_sid])
+    label_data_val = [label_matrix[i] for i in val_file_sid]
+    ##print(fmri_data_train.shape, np.array(label_data_train).shape)
+
+    if verbose:
+        print('\nStep 5: Training the model {} fmri scans and validated on {} fmri scans'
+              .format(len(train_file_sid), len(val_file_sid)))
+        print('training on {} subjects, validated on {} subjects and testing on {} subjects'
+              .format(len(train_sid), len(val_sid), len(test_sid)))
+        print("in total of {} subjects and {} functional scans".format(len(np.unique(subjects)), len(subjects)))
+    #############################################
+    ###transform the data
+    scaler = NDStandardScaler().fit(np.vstack(fmri_data_train))
+    ##scaler = preprocessing.StandardScaler().fit(np.vstack(fmri_data_train))
+    ##fmri_data_train = scaler.transform(fmri_data_train)
+    X_test = scaler.transform(np.vstack(fmri_data_test)) ###.astype('float32', casting='same_kind')
+    nb_class = len(target_name)
+    le = preprocessing.LabelEncoder()
+    le.fit(target_name)
+    Y_test = le.transform(np.block(label_data_test)) ##.astype('uint8')
+    print("data shape for test set:", X_test.shape,Y_test.shape)
+
+    ##preprocess features and labels
+    train_sid = np.random.permutation(range(len(label_data_train)))
+    X = np.array(np.vstack([fmri_data_train[i] for i in train_sid]))   ##using vstack or hstack
+    Y = np.array(np.block([label_data_train[i] for i in train_sid]))  ##check whether data and label corresponding
+    #########################################sampling
+    trial_class_counts = Counter(Y)
+    print(trial_class_counts)
+
+    ###for the unbalanced classes, using different sampling stradige
+    if sampling > 0:
+        Y_new = []; X_new = [];
+        for trial_class, trial_count in trial_class_counts.items():
+            print("Constains {} samples for trial-class {} in the training dataset !".format(trial_count,trial_class))
+            tmp_ind = np.where(Y == trial_class)[0]
+            if trial_count*2 <= int(max(trial_class_counts.values())):
+                train_datasample = int(max(trial_class_counts.values())/trial_count)  ##use round
+                Y_new.append(np.repeat(Y[tmp_ind], train_datasample, axis=0).ravel())  ##samples have the same labels
+
+                if sampling == 1:
+                    print("Oversampling training samples for {} times within trial-class {} \n".format(train_datasample,trial_class))
+                    X_new.append(np.array(X[tmp_ind, :, :]))  ##original samples
+                    time_window = np.empty(len(X.shape)).astype(int)
+                    time_window[-1] = block_dura * 2
+                    for xi in range(int(len(tmp_ind)*(train_datasample-1))):
+                        xx = np.array(X[np.random.choice(tmp_ind, replace=True), :, :])  ##tmp_ind[xi]
+                        rand_timeslice = np.random.randint(block_dura)  ##range(block_dura_used)
+                        xx_wrap = xx.take(range(rand_timeslice,rand_timeslice+block_dura), axis=-1, mode='clip')
+                        X_new.append(np.expand_dims(xx, axis=0))
+                elif sampling > 1:
+                    print("SMOTE: Generating {} times new samples by averaging among {} neighbours within trial-class {} \n".format(train_datasample, sampling,trial_class))
+                    X_new.append(np.array(X[tmp_ind, :, :]))  ##original samples
+                    for xi in range(int(len(tmp_ind)*(train_datasample-1))):
+                        ###randomly choose a trial from the list
+                        ##xx = np.array(X[np.random.choice(tmp_ind, size=sampling, replace=True), :, :])  ##tmp_ind[xi]
+                        ###subject-specific sampling: considering inter-subject variability in brain function
+                        tid = []; tnum=0; xx=[]
+                        while tnum < sampling:
+                            #print("{}:{}".format(len(xx),sampling))
+                            subi = np.random.choice(train_sid, replace=True)
+                            xx0 = fmri_data_train[subi]
+                            yy = label_data_train[subi]
+                            tid = np.where(yy == trial_class)[0]
+                            if len(tid) > 0:
+                                tnum += len(tid)
+                                xx.append(xx0[tid, :, :])
+                        xx = np.vstack(xx)
+                        xx = xx[np.random.choice(tnum, size=sampling, replace=True), :, :]
+                        X_new.append(np.expand_dims(np.mean(xx, axis=0), axis=0))  ##new samples
+            else:
+                X_new.append(X[tmp_ind])
+                Y_new.append(Y[tmp_ind])
+        X = np.array(np.vstack(X_new))
+        Y = np.array(np.block(Y_new))
+        print('After sampling: ', Counter(Y))
+    # print('fmri and label data for training:',X.shape, Y.shape)
+    X = scaler.transform(X)
+    X[np.isnan(X)] = 0; X[np.isinf(X)] = 0
+    X_train_scaled = np.array(X)  ##.astype('float32', casting='same_kind')
+    Y_train_scaled = le.transform(Y)
+    print("data shape for training set:", X_train_scaled.shape,Y_train_scaled.shape)
+
+    val_sid = np.random.permutation(range(len(label_data_val)))
+    X = np.array(np.vstack([fmri_data_val[i] for i in val_sid]))
+    Y = np.array(np.block([label_data_val[i] for i in val_sid]))
+    # print('fmri and label data for validation:',X.shape, Y.shape)
+    X_val_scaled = np.array(scaler.transform(X))
+    Y_val_scaled = le.transform(Y)
+    print("data shape for validation set:", X_val_scaled.shape,Y_val_scaled.shape)
+
+    print('Samples size for training: %d and testing %d and validating %d with %d classes' % (len(Y_train_scaled), len(Y_test), len(Y_val_scaled), nb_class))
+    return X_train_scaled, Y_train_scaled, X_val_scaled, Y_val_scaled, X_test, Y_test, testset_subjects
+
+'''
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='The description of the parameters')
+    parser.add_argument('--task_modality', '-m', default='motor', help="(required, str, default='wm') Choosing which modality of fmri data for modeling", type=str)
+    parser.add_argument('--block_dura', '-b', default=1, help='(optional, int, default=1) The duration of fmri volumes in each data sample', type=int)
+    args = parser.parse_args()
+
+    block_dura = args.block_dura
+    task_modality = args.task_modality
 
     subjects_tc_matrix, label_matrix, modality, target_name, fmri_sub_name = prepare_fmri_data(pathdata, task_modality, pathout, atlas_name=atlas_name, verbose=1)
     Nlabels = len(target_name) + 1
 
-    fmri_data_matrix, label_data_matrix = matching_fmri_data_to_trials_event(subjects_tc_matrix, label_matrix, target_name, block_dura=block_dura)
+    fmri_data_matrix, label_data_matrix, fmri_sub_name, Trial_dura = matching_fmri_data_to_trials_event(subjects_tc_matrix, label_matrix, target_name, fmri_sub_name, block_dura=block_dura)
 
     X_train, Y_train, X_val, Y_val, X_test, Y_test = subject_split_trials_event(fmri_data_matrix, label_data_matrix, fmri_sub_name, target_name, block_dura=block_dura)
 
-
-    gcnn_common = gccn_model_common_param(modality, len(Y_train), target_name)
-    model_perf = utils.model_perf()
+    print('\nStep 6: Model training started!')
+    gcnn_common = gccn_model_common_param(modality, len(Y_train), target_name ,block_dura=block_dura)
+    model_perf = models.model_perf()
 
     ##load brain graphs
     A, perm, L = build_graph_adj_mat_newJune(pathout, mmp_atlas, atlas_name, adj_mat_file, graph_type=adj_mat_type, coarsening_levels=coarsening_levels)
@@ -670,8 +813,8 @@ if __name__ == "__main__":
     from collections import namedtuple
     Record = namedtuple("gcnn_name", ["gcnn_model", "gcnn_params"])
     ###cut the order of graph fourier transform
-    model1, gcnn_name1, params1 = build_fourier_graph_cnn(gcnn_common,Laplacian_list=L, dropout_lambda=0)
-    model8, gcnn_name8, params8 = build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=L,flag_firstorder=0)
+    model1, gcnn_name1, params1 = build_fourier_graph_cnn(gcnn_common,Laplacian_list=L, eigorders=10)
+    model8, gcnn_name8, params8 = build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=L, Korder=10, flag_firstorder=0)
     model9, gcnn_name9, params9 = build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=L,flag_firstorder=1)
 
     gcnn_model_dicts = {gcnn_name1: Record(model1,params1),
@@ -726,3 +869,4 @@ if __name__ == "__main__":
         print('\nResults for graph-cnn using %s filters!' % name)
         print('Accuracy of training:{},testing:{}'.format(np.mean(train_acc[name]), np.mean(test_acc[name])))
         print('Accuracy of validation:mean=%2f' % np.mean(np.max(val_acc[name], axis=1)))
+'''

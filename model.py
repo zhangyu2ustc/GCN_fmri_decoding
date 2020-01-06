@@ -17,9 +17,10 @@ from nilearn import connectome
 import tensorflow.keras.backend as K
 import tensorflow as tf
 
-from lib_new import models, graph, coarsening, utils
+from lib_new import graph, coarsening
+import lib_new.models_gcn as models
 from configure_fmri import *
-from utils import load_rsfmri_data_matrix
+
 
 print('\nAvaliable GPUs for usage: %d \n' % num_GPU)
 config_TF = tf.ConfigProto(intra_op_parallelism_threads=num_CPU,\
@@ -60,13 +61,6 @@ def build_graph_adj_mat(adjacent_mat_file,adjacent_mat_type,coarsening_levels=6,
 
 def build_graph_adj_mat_newJune(pathout,mmp_atlas,atlas_name,adjacent_mat_file,graph_type='surf',coarsening_levels=6,noise_level=0.01,Nneighbours=8):
     #####generate brain graphs
-    try:
-        # import cnn_graph
-        ###sys.path.append('/path/to/application/app/folder')
-        from cnn_graph.lib_new import graph, coarsening
-    except ImportError:
-        print('Could not find the package of graph-cnn ...')
-        print('Please check the location where cnn_graph is !\n')
 
     graph_perm_file = os.path.join(pathout, '_'.join([atlas_name, graph_type, 'brain_graph_layer' + str(coarsening_levels) + '_Nei'+str(Nneighbours)+'.pkl']))
     print(graph_perm_file)
@@ -112,6 +106,7 @@ def build_graph_adj_mat_newJune(pathout,mmp_atlas,atlas_name,adjacent_mat_file,g
             adj_mat = graph.adjacency(dist, idx)
 
         elif graph_type == 'RSFC':
+            from utils import load_rsfmri_data_matrix
             subjects_tc_matrix, subname_coding = load_rsfmri_data_matrix(adjacent_mat_file)
 
             if not os.path.isfile(pathout+atlas_name+'_avg_RSFC_matrix.pkl'):
@@ -152,10 +147,10 @@ def build_graph_adj_mat_newJune(pathout,mmp_atlas,atlas_name,adjacent_mat_file,g
     return A, perm, L
 
 
-def gccn_model_common_param(modality,training_samples,target_name=None,nepochs=50,batch_size=128,layers=6,pool_size=1,hidden_size=256):
+def gccn_model_common_param(modality,training_samples,target_name=None,block_dura=15, eval_report=20,
+                            nepochs=100,batch_size=128,layers=6,pool_size=1,hidden_size=256,):
     ###common settings for gcn models
     C = len(target_name) + 1
-    global block_dura
 
     gcnn_common = {}
     gcnn_common['dir_name'] = modality + '/' + atlas_name + '_win' + str(block_dura) + '/c'+str(len(target_name))
@@ -163,7 +158,7 @@ def gccn_model_common_param(modality,training_samples,target_name=None,nepochs=5
     gcnn_common['num_epochs'] = nepochs
     gcnn_common['batch_size'] = batch_size
     gcnn_common['decay_steps'] = training_samples / gcnn_common['batch_size']  ##refine this according to samples
-    gcnn_common['eval_frequency'] = int(gcnn_common['num_epochs'] * gcnn_common['decay_steps']/20) ##display 20 lines in total-> eval 20 times
+    gcnn_common['eval_frequency'] = int(gcnn_common['num_epochs'] * gcnn_common['decay_steps']/eval_report) ##display 20 lines in total-> eval 20 times
     gcnn_common['brelu'] = 'b2relu' ##'b1relu'
     gcnn_common['pool'] = 'mpool1'
     gcnn_common['initial'] = 'normal'
@@ -184,7 +179,7 @@ def gccn_model_common_param(modality,training_samples,target_name=None,nepochs=5
     return gcnn_common
 
 
-def build_fourier_graph_cnn(gcnn_common,Laplacian_list=None, dropout_lambda=0.0):
+def build_fourier_graph_cnn(gcnn_common,Laplacian_list=None, dropout_lambda=0.0, eigorders=10):
 
     print('\nBuilding convolutional layers with fourier basis of Laplacian\n')
     if not Laplacian_list:
@@ -202,7 +197,7 @@ def build_fourier_graph_cnn(gcnn_common,Laplacian_list=None, dropout_lambda=0.0)
     ###adjust settings for fourier filters
     params['F'] = [32,32,32,32,32,32] #[32,32,64,64,128,128] #[32 * math.pow(2, li) for li in# range(layers)]  # [32, 64, 128]  # Number of graph convolutional filters.
     params['p'] = [1,1,1,1,1,1] #[1,4,1,4,1,4] #[4,1,4,1,4,1] #[pool_size for li in range(layers)]  # [4, 4, 4]  # Pooling sizes.
-    params['K'] = [10,10,10,10,10,10]
+    params['K'] = [eigorders,eigorders,eigorders,eigorders,eigorders,eigorders]
     params['M'] = [gcnn_common['M'][0] * 2, ] + gcnn_common['M']
 
     '''
@@ -249,7 +244,7 @@ def build_spline_graph_cnn(gcnn_common, Laplacian_list=None):
     print([Laplacian_list[li].shape for li in range(len(Laplacian_list))])
     return model, name, params
 
-def build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=None, flag_firstorder=0):
+def build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=None, Korder=5, flag_firstorder=0):
 
     print('\nBuilding convolutional layers with Chebyshev polynomial\n')
     if not Laplacian_list:
@@ -274,7 +269,7 @@ def build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=None, flag_firstorder=
         params['F'] = [32,32,32,32,32,32] #[32,32,64,64,128,128] #[32 * math.pow(2, li) for li in range(layers)]  # [32, 64, 128]  # Number of graph convolutional filters.
         params['p'] = [1,1,1,1,1,1] #[1,4,1,4,1,4] #[4,1,4,1,4,1] #[pool_size for li in range(layers)]  # [4, 4, 4]  # Pooling sizes.
         ###params['K'] = [1 for li in range(len(gcnn_common['p']))]  # [25, 25, 25]  # Polynomial orders.
-        params['K'] = [5,5,5,5,5,5] #[20, 10, 10, 10, 5, 5]  # [25 for li in range(layers*2)]  # [25, 25, 25]  # Polynomial orders.
+        params['K'] = [Korder,Korder,Korder,Korder,Korder,Korder] #[20, 10, 10, 10, 5, 5]  # [25 for li in range(layers*2)]  # [25, 25, 25]  # Polynomial orders.
     else:
         params['F'] = [32,32,32,32,32,32] #[32 * math.pow(2, li) for li in range(layers)]  # [32, 64, 128]  # Number of graph convolutional filters.
         params['p'] = [1,1,1,1,1,1] #[4,1,4,1,4,1] #[pool_size for li in range(layers)]  # [4, 4, 4]  # Pooling sizes.

@@ -6,30 +6,6 @@ import scipy.sparse.linalg
 import scipy.spatial.distance
 import numpy as np
 
-
-def grid(m, dtype=np.float32):
-    """Return the embedding of a grid graph."""
-    M = m**2
-    x = np.linspace(0, 1, m, dtype=dtype)
-    y = np.linspace(0, 1, m, dtype=dtype)
-    xx, yy = np.meshgrid(x, y)
-    z = np.empty((M, 2), dtype)
-    z[:, 0] = xx.reshape(M)
-    z[:, 1] = yy.reshape(M)
-    return z
-
-
-def distance_scipy_spatial(z, k=4, metric='euclidean'):
-    """Compute exact pairwise distances."""
-    d = scipy.spatial.distance.pdist(z, metric)
-    d = scipy.spatial.distance.squareform(d)
-    # k-NN graph.
-    idx = np.argsort(d)[:, 1:k+1]
-    d.sort()
-    d = d[:, 1:k+1]
-    return d, idx
-
-
 def distance_sklearn_metrics(z, k=4, metric='euclidean'):
     """Compute exact pairwise distances."""
     d = sklearn.metrics.pairwise.pairwise_distances(
@@ -39,20 +15,6 @@ def distance_sklearn_metrics(z, k=4, metric='euclidean'):
     d.sort()
     d = d[:, 1:k+1]
     return d, idx
-
-
-def distance_lshforest(z, k=4, metric='cosine'):
-    """Return an approximation of the k-nearest cosine distances."""
-    assert metric is 'cosine'
-    lshf = sklearn.neighbors.LSHForest()
-    lshf.fit(z)
-    dist, idx = lshf.kneighbors(z, n_neighbors=k+1)
-    assert dist.min() < 1e-10
-    dist[dist < 0] = 0
-    return dist, idx
-
-# TODO: other ANNs s.a. NMSLIB, EFANNA, FLANN, Annoy, sklearn neighbors, PANN
-
 
 def adjacency(dist, idx):
     """Return the adjacency matrix of a kNN graph."""
@@ -179,54 +141,6 @@ def plot_spectrum(L, algo='eig'):
     plt.legend(loc='best')
     plt.xlim(0, L[0].shape[0])
     plt.ylim(ymin=0)
-
-
-def lanczos(L, X, K):
-    """
-    Given the graph Laplacian and a data matrix, return a data matrix which can
-    be multiplied by the filter coefficients to filter X using the Lanczos
-    polynomial approximation.
-    """
-    M, N = X.shape
-    assert L.dtype == X.dtype
-
-    def basis(L, X, K):
-        """
-        Lanczos algorithm which computes the orthogonal matrix V and the
-        tri-diagonal matrix H.
-        """
-        a = np.empty((K, N), L.dtype)
-        b = np.zeros((K, N), L.dtype)
-        V = np.empty((K, M, N), L.dtype)
-        V[0, ...] = X / np.linalg.norm(X, axis=0)
-        for k in range(K-1):
-            W = L.dot(V[k, ...])
-            a[k, :] = np.sum(W * V[k, ...], axis=0)
-            W = W - a[k, :] * V[k, ...] - (
-                    b[k, :] * V[k-1, ...] if k > 0 else 0)
-            b[k+1, :] = np.linalg.norm(W, axis=0)
-            V[k+1, ...] = W / b[k+1, :]
-        a[K-1, :] = np.sum(L.dot(V[K-1, ...]) * V[K-1, ...], axis=0)
-        return V, a, b
-
-    def diag_H(a, b, K):
-        """Diagonalize the tri-diagonal H matrix."""
-        H = np.zeros((K*K, N), a.dtype)
-        H[:K**2:K+1, :] = a
-        H[1:(K-1)*K:K+1, :] = b[1:, :]
-        H.shape = (K, K, N)
-        Q = np.linalg.eigh(H.T, UPLO='L')[1]
-        Q = np.swapaxes(Q, 1, 2).T
-        return Q
-
-    V, a, b = basis(L, X, K)
-    Q = diag_H(a, b, K)
-    Xt = np.empty((K, M, N), L.dtype)
-    for n in range(N):
-        Xt[..., n] = Q[..., n].T.dot(V[..., n])
-    Xt *= Q[0, :, np.newaxis, :]
-    Xt *= np.linalg.norm(X, axis=0)
-    return Xt  # Q[0, ...]
 
 
 def rescale_L(L, lmax=2):

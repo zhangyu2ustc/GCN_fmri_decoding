@@ -4,7 +4,9 @@ import tensorflow as tf
 import sklearn
 import scipy.sparse
 import numpy as np
+import pandas as pd
 import os, sys, time, collections, shutil,re
+from pathlib import Path
 from . import checkmat as checkmate
 
 #NFEATURES = 28**2
@@ -356,375 +358,7 @@ class base_model(object):
         return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
 
 
-# Fully connected
-
-
-class fc1(base_model):
-    def __init__(self):
-        super().__init__()
-    def _inference(self, x, dropout):
-        W = self._weight_variable([NFEATURES, NCLASSES])
-        b = self._bias_variable([NCLASSES])
-        y = tf.matmul(x, W) + b
-        return y
-
-class fc2(base_model):
-    def __init__(self, nhiddens):
-        super().__init__()
-        self.nhiddens = nhiddens
-    def _inference(self, x, dropout):
-        with tf.name_scope('fc1'):
-            W = self._weight_variable([NFEATURES, self.nhiddens])
-            b = self._bias_variable([self.nhiddens])
-            y = tf.nn.relu(tf.matmul(x, W) + b)
-        with tf.name_scope('fc2'):
-            W = self._weight_variable([self.nhiddens, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.matmul(y, W) + b
-        return y
-
-
-# Convolutional
-
-
-class cnn2(base_model):
-    """Simple convolutional model."""
-    def __init__(self, K, F):
-        super().__init__()
-        self.K = K  # Patch size
-        self.F = F  # Number of features
-    def _inference(self, x, dropout):
-        with tf.name_scope('conv1'):
-            W = self._weight_variable([self.K, self.K, 1, self.F])
-            b = self._bias_variable([self.F])
-#            b = self._bias_variable([1, 28, 28, self.F])
-            x_2d = tf.reshape(x, [-1,28,28,1])
-            y_2d = self._conv2d(x_2d, W) + b
-            y_2d = tf.nn.relu(y_2d)
-        with tf.name_scope('fc1'):
-            y = tf.reshape(y_2d, [-1, NFEATURES*self.F])
-            W = self._weight_variable([NFEATURES*self.F, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.matmul(y, W) + b
-        return y
-
-class fcnn2(base_model):
-    """CNN using the FFT."""
-    def __init__(self, F):
-        super().__init__()
-        self.F = F  # Number of features
-    def _inference(self, x, dropout):
-        with tf.name_scope('conv1'):
-            # Transform to Fourier domain
-            x_2d = tf.reshape(x, [-1, 28, 28])
-            x_2d = tf.complex(x_2d, 0)
-            xf_2d = tf.fft2d(x_2d)
-            xf = tf.reshape(xf_2d, [-1, NFEATURES])
-            xf = tf.expand_dims(xf, 1)  # NSAMPLES x 1 x NFEATURES
-            xf = tf.transpose(xf)  # NFEATURES x 1 x NSAMPLES
-            # Filter
-            Wreal = self._weight_variable([int(NFEATURES/2), self.F, 1])
-            Wimg = self._weight_variable([int(NFEATURES/2), self.F, 1])
-            W = tf.complex(Wreal, Wimg)
-            xf = xf[:int(NFEATURES/2), :, :]
-            yf = tf.matmul(W, xf)  # for each feature
-            yf = tf.concat([yf, tf.conj(yf)], axis=0)
-            yf = tf.transpose(yf)  # NSAMPLES x NFILTERS x NFEATURES
-            yf_2d = tf.reshape(yf, [-1, 28, 28])
-            # Transform back to spatial domain
-            y_2d = tf.ifft2d(yf_2d)
-            y_2d = tf.real(y_2d)
-            y = tf.reshape(y_2d, [-1, self.F, NFEATURES])
-            # Bias and non-linearity
-            b = self._bias_variable([1, self.F, 1])
-#            b = self._bias_variable([1, self.F, NFEATURES])
-            y += b  # NSAMPLES x NFILTERS x NFEATURES
-            y = tf.nn.relu(y)
-        with tf.name_scope('fc1'):
-            W = self._weight_variable([self.F*NFEATURES, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.reshape(y, [-1, self.F*NFEATURES])
-            y = tf.matmul(y, W) + b
-        return y
-
-
 # Graph convolutional
-
-
-class fgcnn2(base_model):
-    """Graph CNN with full weights, i.e. patch has the same size as input."""
-    def __init__(self, L, F):
-        super().__init__()
-        #self.L = L  # Graph Laplacian, NFEATURES x NFEATURES
-        self.F = F  # Number of filters
-        _, self.U = graph.fourier(L)
-    def _inference(self, x, dropout):
-        # x: NSAMPLES x NFEATURES
-        with tf.name_scope('gconv1'):
-            # Transform to Fourier domain
-            U = tf.constant(self.U, dtype=tf.float32)
-            xf = tf.matmul(x, U)
-            xf = tf.expand_dims(xf, 1)  # NSAMPLES x 1 x NFEATURES
-            xf = tf.transpose(xf)  # NFEATURES x 1 x NSAMPLES
-            # Filter
-            W = self._weight_variable([NFEATURES, self.F, 1])
-            yf = tf.matmul(W, xf)  # for each feature
-            yf = tf.transpose(yf)  # NSAMPLES x NFILTERS x NFEATURES
-            yf = tf.reshape(yf, [-1, NFEATURES])
-            # Transform back to graph domain
-            Ut = tf.transpose(U)
-            y = tf.matmul(yf, Ut)
-            y = tf.reshape(yf, [-1, self.F, NFEATURES])
-            # Bias and non-linearity
-            b = self._bias_variable([1, self.F, 1])
-#            b = self._bias_variable([1, self.F, NFEATURES])
-            y += b  # NSAMPLES x NFILTERS x NFEATURES
-            y = tf.nn.relu(y)
-        with tf.name_scope('fc1'):
-            W = self._weight_variable([self.F*NFEATURES, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.reshape(y, [-1, self.F*NFEATURES])
-            y = tf.matmul(y, W) + b
-        return y
-
-
-class lgcnn2_1(base_model):
-    """Graph CNN which uses the Lanczos approximation."""
-    def __init__(self, L, F, K):
-        super().__init__()
-        self.L = L  # Graph Laplacian, M x M
-        self.F = F  # Number of filters
-        self.K = K  # Polynomial order, i.e. filter size (number of hopes)
-    def _inference(self, x, dropout):
-        with tf.name_scope('gconv1'):
-            N, M, K = x.get_shape()  # N: number of samples, M: number of features
-            M = int(M)
-            # Transform to Lanczos basis
-            xl = tf.reshape(x, [-1, self.K])  # NM x K
-            # Filter
-            W = self._weight_variable([self.K, self.F])
-            y = tf.matmul(xl, W)  # NM x F
-            y = tf.reshape(y, [-1, M, self.F])  # N x M x F
-            # Bias and non-linearity
-            b = self._bias_variable([1, 1, self.F])
-#            b = self._bias_variable([1, M, self.F])
-            y += b  # N x M x F
-            y = tf.nn.relu(y)
-        with tf.name_scope('fc1'):
-            W = self._weight_variable([self.F*M, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.reshape(y, [-1, self.F*M])
-            y = tf.matmul(y, W) + b
-        return y
-
-class lgcnn2_2(base_model):
-    """Graph CNN which uses the Lanczos approximation."""
-    def __init__(self, L, F, K):
-        super().__init__()
-        self.L = L  # Graph Laplacian, M x M
-        self.F = F  # Number of filters
-        self.K = K  # Polynomial order, i.e. filter size (number of hopes)
-    def _inference(self, x, dropout):
-        with tf.name_scope('gconv1'):
-            N, M = x.get_shape()  # N: number of samples, M: number of features
-            M = int(M)
-            # Transform to Lanczos basis
-            xl = tf.transpose(x)  # M x N
-            def lanczos(x):
-                return graph.lanczos(self.L, x, self.K)
-            xl = tf.py_func(lanczos, [xl], [tf.float32])[0]
-            xl = tf.transpose(xl)  # N x M x K
-            xl = tf.reshape(xl, [-1, self.K])  # NM x K
-            # Filter
-            W = self._weight_variable([self.K, self.F])
-            y = tf.matmul(xl, W)  # NM x F
-            y = tf.reshape(y, [-1, M, self.F])  # N x M x F
-            # Bias and non-linearity
-#            b = self._bias_variable([1, 1, self.F])
-            b = self._bias_variable([1, M, self.F])
-            y += b  # N x M x F
-            y = tf.nn.relu(y)
-        with tf.name_scope('fc1'):
-            W = self._weight_variable([self.F*M, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.reshape(y, [-1, self.F*M])
-            y = tf.matmul(y, W) + b
-        return y
-
-
-class cgcnn2_2(base_model):
-    """Graph CNN which uses the Chebyshev approximation."""
-    def __init__(self, L, F, K):
-        super().__init__()
-        self.L = graph.rescale_L(L, lmax=2)  # Graph Laplacian, M x M
-        self.F = F  # Number of filters
-        self.K = K  # Polynomial order, i.e. filter size (number of hopes)
-    def _inference(self, x, dropout):
-        with tf.name_scope('gconv1'):
-            N, M = x.get_shape()  # N: number of samples, M: number of features
-            M = int(M)
-            # Transform to Chebyshev basis
-            xc = tf.transpose(x)  # M x N
-            def chebyshev(x):
-                return graph.chebyshev(self.L, x, self.K)
-            xc = tf.py_func(chebyshev, [xc], [tf.float32])[0]
-            xc = tf.transpose(xc)  # N x M x K
-            xc = tf.reshape(xc, [-1, self.K])  # NM x K
-            # Filter
-            W = self._weight_variable([self.K, self.F])
-            y = tf.matmul(xc, W)  # NM x F
-            y = tf.reshape(y, [-1, M, self.F])  # N x M x F
-            # Bias and non-linearity
-#            b = self._bias_variable([1, 1, self.F])
-            b = self._bias_variable([1, M, self.F])
-            y += b  # N x M x F
-            y = tf.nn.relu(y)
-        with tf.name_scope('fc1'):
-            W = self._weight_variable([self.F*M, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.reshape(y, [-1, self.F*M])
-            y = tf.matmul(y, W) + b
-        return y
-
-
-class cgcnn2_3(base_model):
-    """Graph CNN which uses the Chebyshev approximation."""
-    def __init__(self, L, F, K):
-        super().__init__()
-        L = graph.rescale_L(L, lmax=2)  # Graph Laplacian, M x M
-        self.L = L.toarray()
-        self.F = F  # Number of filters
-        self.K = K  # Polynomial order, i.e. filter size (number of hopes)
-    def _inference(self, x, dropout):
-        with tf.name_scope('gconv1'):
-            N, M = x.get_shape()  # N: number of samples, M: number of features
-            M = int(M)
-            # Filter
-            W = self._weight_variable([self.K, self.F])
-            def filter(xt, k):
-                xt = tf.reshape(xt, [-1, 1])  # NM x 1
-                w = tf.slice(W, [k,0], [1,-1])  # 1 x F
-                y = tf.matmul(xt, w)  # NM x F
-                return tf.reshape(y, [-1, M, self.F])  # N x M x F
-            xt0 = x
-            y = filter(xt0, 0)
-            if self.K > 1:
-                xt1 = tf.matmul(x, self.L, b_is_sparse=True)  # N x M
-                y += filter(xt1, 1)
-            for k in range(2, self.K):
-                xt2 = 2 * tf.matmul(xt1, self.L, b_is_sparse=True) - xt0  # N x M
-                y += filter(xt2, k)
-                xt0, xt1 = xt1, xt2
-            # Bias and non-linearity
-#            b = self._bias_variable([1, 1, self.F])
-            b = self._bias_variable([1, M, self.F])
-            y += b  # N x M x F
-            y = tf.nn.relu(y)
-        with tf.name_scope('fc1'):
-            W = self._weight_variable([self.F*M, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.reshape(y, [-1, self.F*M])
-            y = tf.matmul(y, W) + b
-        return y
-
-
-class cgcnn2_4(base_model):
-    """Graph CNN which uses the Chebyshev approximation."""
-    def __init__(self, L, F, K):
-        super().__init__()
-        L = graph.rescale_L(L, lmax=2)  # Graph Laplacian, M x M
-        L = L.tocoo()
-        data = L.data
-        indices = np.empty((L.nnz, 2))
-        indices[:,0] = L.row
-        indices[:,1] = L.col
-        L = tf.SparseTensor(indices, data, L.shape)
-        self.L = tf.sparse_reorder(L)
-        self.F = F  # Number of filters
-        self.K = K  # Polynomial order, i.e. filter size (number of hopes)
-    def _inference(self, x, dropout):
-        with tf.name_scope('gconv1'):
-            N, M = x.get_shape()  # N: number of samples, M: number of features
-            M = int(M)
-            # Filter
-            W = self._weight_variable([self.K, self.F])
-            def filter(xt, k):
-                xt = tf.transpose(xt)  # N x M
-                xt = tf.reshape(xt, [-1, 1])  # NM x 1
-                w = tf.slice(W, [k,0], [1,-1])  # 1 x F
-                y = tf.matmul(xt, w)  # NM x F
-                return tf.reshape(y, [-1, M, self.F])  # N x M x F
-            xt0 = tf.transpose(x)  # M x N
-            y = filter(xt0, 0)
-            if self.K > 1:
-                xt1 = tf.sparse_tensor_dense_matmul(self.L, xt0)
-                y += filter(xt1, 1)
-            for k in range(2, self.K):
-                xt2 = 2 * tf.sparse_tensor_dense_matmul(self.L, xt1) - xt0  # M x N
-                y += filter(xt2, k)
-                xt0, xt1 = xt1, xt2
-            # Bias and non-linearity
-#            b = self._bias_variable([1, 1, self.F])
-            b = self._bias_variable([1, M, self.F])
-            y += b  # N x M x F
-            y = tf.nn.relu(y)
-        with tf.name_scope('fc1'):
-            W = self._weight_variable([self.F*M, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.reshape(y, [-1, self.F*M])
-            y = tf.matmul(y, W) + b
-        return y
-
-
-class cgcnn2_5(base_model):
-    """Graph CNN which uses the Chebyshev approximation."""
-    def __init__(self, L, F, K):
-        super().__init__()
-        L = graph.rescale_L(L, lmax=2)  # Graph Laplacian, M x M
-        L = L.tocoo()
-        data = L.data
-        indices = np.empty((L.nnz, 2))
-        indices[:,0] = L.row
-        indices[:,1] = L.col
-        L = tf.SparseTensor(indices, data, L.shape)
-        self.L = tf.sparse_reorder(L)
-        self.F = F  # Number of filters
-        self.K = K  # Polynomial order, i.e. filter size (number of hopes)
-    def _inference(self, x, dropout):
-        with tf.name_scope('gconv1'):
-            N, M = x.get_shape()  # N: number of samples, M: number of features
-            M = int(M)
-            # Transform to Chebyshev basis
-            xt0 = tf.transpose(x)  # M x N
-            xt = tf.expand_dims(xt0, 0)  # 1 x M x N
-            def concat(xt, x):
-                x = tf.expand_dims(x, 0)  # 1 x M x N
-                return tf.concat([xt, x], axis=0)  # K x M x N
-            if self.K > 1:
-                xt1 = tf.sparse_tensor_dense_matmul(self.L, xt0)
-                xt = concat(xt, xt1)
-            for k in range(2, self.K):
-                xt2 = 2 * tf.sparse_tensor_dense_matmul(self.L, xt1) - xt0  # M x N
-                xt = concat(xt, xt2)
-                xt0, xt1 = xt1, xt2
-            xt = tf.transpose(xt)  # N x M x K
-            xt = tf.reshape(xt, [-1,self.K])  # NM x K
-            # Filter
-            W = self._weight_variable([self.K, self.F])
-            y = tf.matmul(xt, W)  # NM x F
-            y = tf.reshape(y, [-1, M, self.F])  # N x M x F
-            # Bias and non-linearity
-#            b = self._bias_variable([1, 1, self.F])
-            b = self._bias_variable([1, M, self.F])
-            y += b  # N x M x F
-            y = tf.nn.relu(y)
-        with tf.name_scope('fc1'):
-            W = self._weight_variable([self.F*M, NCLASSES])
-            b = self._bias_variable([NCLASSES])
-            y = tf.reshape(y, [-1, self.F*M])
-            y = tf.matmul(y, W) + b
-        return y
-
 
 def bspline_basis(K, x, degree=3):
     """
@@ -1297,3 +931,270 @@ class finetuning_cgcnn(base_model):
             with tf.control_dependencies([op_gradients]):
                 op_train = tf.identity(learning_rate, name='control')
             return op_train
+
+
+class model_perf(object):
+
+    def __init__(s):
+        s.names, s.params = set(), {}
+        s.fit_accuracies, s.fit_losses, s.fit_time = {}, {}, {}
+        s.train_accuracy, s.train_f1, s.train_loss = {}, {}, {}
+        s.test_accuracy, s.test_f1, s.test_loss = {}, {}, {}
+
+    def test(s, model, name, params, train_data, train_labels, val_data, val_labels, test_data, test_labels, target_name=None):
+        s.params[name] = params
+        s.fit_accuracies[name], s.fit_losses[name], s.fit_time[name] = \
+                model.fit(train_data, train_labels, val_data, val_labels)
+        string, s.train_accuracy[name], s.train_f1[name], s.train_loss[name] = \
+                model.evaluate(train_data, train_labels, target_name=target_name)
+        print('\ntrain {}\n'.format(string))
+
+        string, s.test_accuracy[name], s.test_f1[name], s.test_loss[name] = \
+                model.evaluate(test_data, test_labels, target_name=target_name)
+        print('\ntest  {}\n'.format(string))
+        sys.stdout.flush()
+        s.names.add(name)
+
+        return s
+
+    def predict(s, ckp_path, test_data, test_labels, target_name=None, batch_size=128, trial_dura=17, flag_starttr=False,sub_name=None):
+
+        ##ckp_path = Path(os.path.join(pathcheckpoints,modality,'win'+str(block_dura),method_str_new))
+        ckp_path = str(ckp_path) + '/' + 'model/'
+        '''
+        for model_file in sorted(Path(ckp_path).glob('model-*.meta')):
+            model_name = os.path.basename(model_file).split('.')[0]
+        '''
+        lines = [line.rstrip('\n') for line in open(os.path.join(ckp_path, 'checkpoint'))]
+        model_name = lines[1].replace('"', '').split(' ')[-1].split('/')[-1]
+        print(ckp_path + model_name + ".meta")
+
+        pred_logits = []
+        pred_labels = []
+        pred_loss = 0
+        data_size = test_data.shape[0]
+
+        tf.reset_default_graph()
+        with tf.Session() as sess:
+            saver = tf.train.import_meta_graph(ckp_path + model_name + ".meta", clear_devices=True)
+            saver.restore(sess, ckp_path + model_name)
+            #saver.restore(sess, tf.train.latest_checkpoint(ckp_path))
+
+            ops = sess.graph.get_operations()
+            # all the tensor informations
+            tensors = [m.values() for m in ops]
+            tensors_name = [m.name for m in ops]
+
+            in_data = sess.graph.get_tensor_by_name("inputs/data:0")
+            in_label = sess.graph.get_tensor_by_name("inputs/labels:0")
+            in_dropout = sess.graph.get_tensor_by_name("inputs/dropout:0")
+
+            logits = sess.graph.get_tensor_by_name("logits/add:0")
+            ##y_pred = tf.argmax(logits, axis=1)
+            y_pred = sess.graph.get_tensor_by_name("prediction/ArgMax:0")
+            loss = sess.graph.get_tensor_by_name("loss/add:0")
+
+            # Now we are dupplicating the input in the first dimension
+            for begin in range(0, data_size, batch_size):
+                end = min([begin + batch_size, data_size])
+                ##print(begin, end)
+
+                batch_data = np.zeros((batch_size,) + test_data.shape[1:])
+                tmp_data = test_data[begin:end, :, :]
+                if type(tmp_data) is not np.ndarray:
+                    try:
+                        tmp_data = tmp_data.toarray()  # convert sparse matrices
+                    except:
+                        print("Converting sparse matrix of nd array")
+
+                batch_data[:end - begin] = tmp_data
+                batch_labels = np.zeros(batch_size)
+                batch_labels[:end - begin] = test_labels[begin:end]
+                ##print(batch_data.shape, tmp_data.shape, batch_labels.shape)
+
+                feed_dict = {in_data: batch_data, in_label: batch_labels, in_dropout: 1}
+                batch_logits, batch_pred, batch_loss = sess.run([logits, y_pred, loss], feed_dict)
+
+                pred_logits.append(batch_logits)
+                pred_labels.append(batch_pred)
+                pred_loss += batch_loss
+
+        pred_labels = np.stack(pred_labels,axis=0).flatten()[:len(test_labels)]
+        pred_logits = np.stack(pred_logits, axis=0).flatten()[:len(test_labels)]
+
+        print(sklearn.metrics.classification_report(test_labels, pred_labels, labels=range(len(target_name)), target_names=target_name))
+        print('Confusion Matrix:')
+        print(sklearn.metrics.confusion_matrix(test_labels, pred_labels, labels=range(len(target_name))))
+
+        test_acc = []
+        ncorrects = sum(pred_labels == test_labels)
+        accuracy = 100 * sklearn.metrics.accuracy_score(test_labels, pred_labels)
+        f1 = 100 * sklearn.metrics.f1_score(test_labels, pred_labels, average='weighted')
+        string = 'accuracy: {:.2f} ({:d} / {:d}), f1 (weighted): {:.2f}, loss: {:.2e}'.format(
+                accuracy, ncorrects, len(test_labels), f1, pred_loss)
+        print(string)
+        test_acc.append(accuracy)
+        sys.stdout.flush()
+
+        if sub_name is not None:
+            print('\nGenerating subject-specific f1-score for task prediction...')
+            print(pred_labels.shape, test_labels.shape, len(sub_name), len(sub_name)*6)
+            try:
+                y_pred = np.array(np.split(pred_labels, len(sub_name)))
+                y_label = np.array(np.split(test_labels, len(sub_name)))
+            except:
+                sub_used = pred_labels.shape[0] // len(sub_name) * len(sub_name)
+                y_pred = np.array(np.split(pred_labels[:sub_used,], len(sub_name)))
+                y_label = np.array(np.split(test_labels[:sub_used,], len(sub_name)))
+
+            test_acc = np.zeros((len(sub_name), len(target_name)+1))
+            for subi in range(len(sub_name)):
+                for li in range(len(target_name)):
+                    trial_mask = y_label[subi, :] == li
+                    f1 = sklearn.metrics.f1_score(y_label[subi, trial_mask], y_pred[subi, trial_mask], average='weighted')
+                    test_acc[subi, li] = f1
+                f1 = sklearn.metrics.f1_score(y_label[subi, :], y_pred[subi, :], average='weighted')
+                test_acc[subi, -1] = f1  # f1
+            result_df = pd.DataFrame()
+            result_df['subject'] = sub_name
+            for li,task in enumerate(target_name):
+                result_df[task] = test_acc[:,li]
+            result_df['avg'] = test_acc[:, -1]
+            result_df.to_csv('train_logs/'+target_name[0].split('_')[-1]+'_f1score_testacc_'+str(len(sub_name))+'subjects.csv', sep='\t', encoding='utf-8', index=False)
+
+        ####for each time point
+        if flag_starttr:
+            y_pred = np.reshape(pred_labels, (-1, trial_dura))
+            y_label = np.reshape(test_labels, (-1, trial_dura))
+            test_acc = np.zeros((len(target_name),trial_dura))
+            for li in range(len(target_name)):
+                print('\n',target_name[li],':')
+                for ti in range(trial_dura):
+                    trial_mask = y_label[:, ti] == li
+                    ncorrects = sum(y_pred[trial_mask, ti] == y_label[trial_mask, ti])
+                    accuracy = 100 * sklearn.metrics.accuracy_score(y_label[trial_mask, ti], y_pred[trial_mask, ti])
+                    f1 = 100 * sklearn.metrics.f1_score(y_label[trial_mask, ti], y_pred[trial_mask, ti],average='weighted')
+                    string = 'start_tr {:d} accuracy: {:.2f} ({:d} / {:d}), f1 (weighted): {:.2f}'.format(ti, accuracy, ncorrects, np.sum(trial_mask), f1)
+                    print(string)
+                    test_acc[li,ti] = accuracy #f1
+
+            print('\ntotal:')
+            for ti in range(trial_dura):
+                ncorrects = sum(y_pred[:, ti] == y_label[:, ti])
+                accuracy = 100 * sklearn.metrics.accuracy_score(y_label[:, ti], y_pred[:, ti])
+                f1 = 100 * sklearn.metrics.f1_score(y_label[:, ti], y_pred[:, ti], average='weighted')
+                string = 'start_tr {:d} accuracy: {:.2f} ({:d} / {:d}), f1 (weighted): {:.2f}'.format(ti, accuracy,ncorrects, len(y_pred), f1)
+                print(string)
+        return pred_logits, pred_labels, pred_loss, test_acc
+
+
+    def predict_allmodel(s, ckp_path, test_data, test_labels, target_name=None, batch_size=128):
+
+        ##ckp_path = Path(os.path.join(pathcheckpoints,modality,'win'+str(block_dura),method_str_new))
+
+        for model_file in sorted(Path(ckp_path).glob('model-*.meta')):
+            model_name = os.path.basename(model_file).split('.')[0]
+            print(str(ckp_path) + '/' + model_name + ".meta")
+
+            pred_logits = []
+            pred_labels = []
+            pred_loss = 0
+            data_size = test_data.shape[0]
+
+            tf.reset_default_graph()
+            with tf.Session() as sess:
+                saver = tf.train.import_meta_graph(str(ckp_path) + '/' + model_name + ".meta", clear_devices=True)
+                saver.restore(sess, str(ckp_path) + '/' + model_name)
+                #saver.restore(sess, tf.train.latest_checkpoint(ckp_path))
+
+                ops = sess.graph.get_operations()
+                # all the tensor informations
+                tensors = [m.values() for m in ops]
+                tensors_name = [m.name for m in ops]
+
+                in_data = sess.graph.get_tensor_by_name("inputs/data:0")
+                in_label = sess.graph.get_tensor_by_name("inputs/labels:0")
+                in_dropout = sess.graph.get_tensor_by_name("inputs/dropout:0")
+
+                logits = sess.graph.get_tensor_by_name("logits/add:0")
+                ##y_pred = tf.argmax(logits, axis=1)
+                y_pred = sess.graph.get_tensor_by_name("prediction/ArgMax:0")
+                loss = sess.graph.get_tensor_by_name("loss/add:0")
+
+                # Now we are dupplicating the input in the first dimension
+                for begin in range(0, data_size, batch_size):
+                    end = min([begin + batch_size, data_size])
+                    ##print(begin, end)
+
+                    batch_data = np.zeros((batch_size,) + test_data.shape[1:])
+                    tmp_data = test_data[begin:end, :, :]
+                    if type(tmp_data) is not np.ndarray:
+                        try:
+                            tmp_data = tmp_data.toarray()  # convert sparse matrices
+                        except:
+                            print("Converting sparse matrix of nd array")
+
+                    batch_data[:end - begin] = tmp_data
+                    batch_labels = np.zeros(batch_size)
+                    batch_labels[:end - begin] = test_labels[begin:end]
+                    ##print(batch_data.shape, tmp_data.shape, batch_labels.shape)
+
+                    feed_dict = {in_data: batch_data, in_label: batch_labels, in_dropout: 1}
+                    batch_logits, batch_pred, batch_loss = sess.run([logits, y_pred, loss], feed_dict)
+
+                    pred_logits.append(batch_logits)
+                    pred_labels.append(batch_pred)
+                    pred_loss += batch_loss
+
+            pred_labels = np.stack(pred_labels,axis=0).flatten()[:len(test_labels)]
+            pred_logits = np.stack(pred_logits, axis=0).flatten()[:len(test_labels)]
+
+            print(sklearn.metrics.classification_report(test_labels, pred_labels, labels=range(len(target_name)), target_names=target_name))
+            print('Confusion Matrix:')
+            print(sklearn.metrics.confusion_matrix(test_labels, pred_labels, labels=range(len(target_name))))
+
+            ncorrects = sum(pred_labels == test_labels)
+            accuracy = 100 * sklearn.metrics.accuracy_score(test_labels, pred_labels)
+            f1 = 100 * sklearn.metrics.f1_score(test_labels, pred_labels, average='weighted')
+            string = 'accuracy: {:.2f} ({:d} / {:d}), f1 (weighted): {:.2f}, loss: {:.2e}'.format(
+                    accuracy, ncorrects, len(test_labels), f1, pred_loss)
+            print(string)
+            sys.stdout.flush()
+        return pred_logits, pred_labels, pred_loss
+
+    def show(s, fontsize=None):
+        import matplotlib.pyplot as plt
+
+        if fontsize:
+            plt.rc('pdf', fonttype=42)
+            plt.rc('ps', fonttype=42)
+            plt.rc('font', size=fontsize)         # controls default text sizes
+            plt.rc('axes', titlesize=fontsize)    # fontsize of the axes title
+            plt.rc('axes', labelsize=fontsize)    # fontsize of the x any y labels
+            plt.rc('xtick', labelsize=fontsize)   # fontsize of the tick labels
+            plt.rc('ytick', labelsize=fontsize)   # fontsize of the tick labels
+            plt.rc('legend', fontsize=fontsize)   # legend fontsize
+            plt.rc('figure', titlesize=fontsize)  # size of the figure title
+        print('  accuracy        F1             loss        time [ms]  name')
+        print('test  train   test  train   test     train')
+        for name in sorted(s.names):
+            print('{:5.2f} {:5.2f}   {:5.2f} {:5.2f}   {:.2e} {:.2e}   {:3.0f}   {}'.format(
+                    s.test_accuracy[name], s.train_accuracy[name],
+                    s.test_f1[name], s.train_f1[name],
+                    s.test_loss[name], s.train_loss[name], s.fit_time[name]*1000, name))
+
+        fig, ax = plt.subplots(1, 2, figsize=(15, 5))
+        for name in sorted(s.names):
+            steps = np.arange(len(s.fit_accuracies[name])) + 1
+            steps *= s.params[name]['eval_frequency']
+            ax[0].plot(steps, s.fit_accuracies[name], '.-', label=name)
+            ax[1].plot(steps, s.fit_losses[name], '.-', label=name)
+        ax[0].set_xlim(min(steps), max(steps))
+        ax[1].set_xlim(min(steps), max(steps))
+        ax[0].set_xlabel('step')
+        ax[1].set_xlabel('step')
+        ax[0].set_ylabel('validation accuracy')
+        ax[1].set_ylabel('training loss')
+        ax[0].legend(loc='lower right')
+        ax[1].legend(loc='upper right')
+        #fig.savefig('training.pdf')
