@@ -275,9 +275,11 @@ def load_event_from_h5(events_all_subjects_file, task_contrasts, Trial_Num=284, 
             xx = [x.replace("['", "").replace("']", "") for x in label_matrix[subi].split("', '")]
             subjects_trial_label_matrix.append(xx)
         subjects_trial_label_matrix = pd.DataFrame(data=(subjects_trial_label_matrix))
+        Trial_Num = subjects_trial_label_matrix.shape[-1]
     except:
+        Trial_Num = sum(subjects_trial_labels.columns.str.contains('trial[0-9]'))
         print('only extracting {} trials from event design'.format(Trial_Num))
-        subjects_trial_label_matrix = subjects_trial_labels.loc[:, 'trial1':'trial' + str(Trial_Num)]
+        subjects_trial_label_matrix = subjects_trial_labels.loc[:, subjects_trial_labels.columns.str.contains('trial[0-9]')]
 
     ##subjects_trial_label_matrix = subjects_trial_labels.values.tolist()
     trialID = subjects_trial_labels['trialID']

@@ -38,26 +38,7 @@ num_CPU = 6
 num_GPU = 1
 
 ###brain graph setting
-adj_mat_type = 'RSFC'
 coarsening_levels = 1
-
-###
-if atlas_name == 'MMP':
-    atlas_name = 'MMP'
-    mmp_atlas = pathout + "../codes/HCP_S1200_GroupAvg_v1/" + "Q1-Q6_RelatedValidation210.CorticalAreas_dil_Final_Final_Areas_Group_Colors.32k_fs_LR.dlabel.nii"
-elif atlas_name == 'BNA':
-    atlas_name = 'BNA'
-    mmp_atlas = pathout + "../codes/HCP_S1200_GroupAvg_v1/" + "BN_Atlas_246_2mm.nii.gz"
-elif atlas_name == 'CBIG1k':
-    atlas_name = 'CBIG1k'
-    mmp_atlas = pathout + "../codes/HCP_S1200_GroupAvg_v1/" + "Schaefer2018_1000Parcels_17Networks_order.dlabel.nii"
-elif atlas_name == 'CBIG400':
-    atlas_name = 'CBIG400'
-    mmp_atlas = pathout + "../codes/HCP_S1200_GroupAvg_v1/" + "Schaefer2018_400Parcels_17Networks_order.dlabel.nii"
-
-if adj_mat_type == 'surf':
-    adj_mat_file = pathout + atlas_name + '_adjacency_mat_white.pconn.nii'
-elif adj_mat_type == 'SC':
-    adj_mat_file = pathatlas + 'S1200.All.corrThickness_MSMAll.32k_fs_LR.dscalar.nii'
-elif adj_mat_type == 'RSFC':
-    adj_mat_file = pathout + '_'.join(('rsfmri', 'REST1', 'LR', atlas_name, "ROI_act_1200R_test2_March2019_new.lmdb"))
+adj_mat_type = 'RSFC' ##'surf'
+mmp_atlas = pathatlas + "Q1-Q6_RelatedValidation210.CorticalAreas_dil_Final_Final_Areas_Group_Colors.32k_fs_LR.dlabel.nii"
+adj_mat_file = pathout + '_'.join(('rsfmri', 'REST1', 'LR', atlas_name, "ROI_act_1200R_test2_March2019_new.lmdb"))

@@ -29,6 +29,9 @@ if __name__ == "__main__":
 
     parser.add_argument('--task_modality', '-m', default='motor', help="(required, str, default='wm') Choosing which modality of fmri data for modeling", type=str)
     parser.add_argument('--block_dura', '-b', default=1, help='(optional, int, default=1) The duration of fmri volumes in each data sample', type=int)
+
+    parser.add_argument('--eigorder', '-e', default=0, help='(optional, int, default=1) Order of Laplacian eigenvectors', type=int)
+    parser.add_argument('--Korder', '-k', default=10, help='(optional, int, default=1) Order of Chebychev polynomials', type=int)
     args = parser.parse_args()
 
     block_dura = args.block_dura
@@ -42,7 +45,7 @@ if __name__ == "__main__":
     X_train, Y_train, X_val, Y_val, X_test, Y_test, testset_subjects = subject_split_trials_event(fmri_data_matrix, label_data_matrix, fmri_sub_name, target_name, block_dura=block_dura)
 
     print('\nStep 6: Model training started!')
-    gcnn_common = gccn_model_common_param(modality, len(Y_train), target_name ,block_dura=block_dura)
+    gcnn_common = gccn_model_common_param(modality, len(Y_train), target_name,block_dura=block_dura)
     model_perf = models.model_perf()
 
     ##load brain graphs
@@ -51,8 +54,8 @@ if __name__ == "__main__":
     from collections import namedtuple
     Record = namedtuple("gcnn_name", ["gcnn_model", "gcnn_params"])
     ###cut the order of graph fourier transform
-    model1, gcnn_name1, params1 = build_fourier_graph_cnn(gcnn_common,Laplacian_list=L, eigorders=10)
-    model8, gcnn_name8, params8 = build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=L, Korder=10, flag_firstorder=0)
+    model1, gcnn_name1, params1 = build_fourier_graph_cnn(gcnn_common,Laplacian_list=L, eigorders=args.eigorder)
+    model8, gcnn_name8, params8 = build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=L, Korder=args.Korder, flag_firstorder=0)
     model9, gcnn_name9, params9 = build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=L,flag_firstorder=1)
 
     gcnn_model_dicts = {gcnn_name1: Record(model1,params1),

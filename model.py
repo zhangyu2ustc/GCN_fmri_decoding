@@ -189,34 +189,35 @@ def build_fourier_graph_cnn(gcnn_common,Laplacian_list=None, dropout_lambda=0.0,
         print([Laplacian_list[li].shape for li in range(len(Laplacian_list))])
 
     ##model#1: two convolutional layers with fourier transform as filters
-    dropout_str = '_drop'+str(dropout_lambda) if dropout_lambda>0 else ''
-    name = 'fgconv_fgconv_fc_softmax'+dropout_str  # 'Non-Param'
+    dropout_str = 'drop'+str(dropout_lambda) if dropout_lambda>0 else ''
+    eigorder_str = 'full' if not eigorders else 'K'+str(eigorders)
+    name = '_'.join(('fgconv_fgconv_fc_softmax',eigorder_str, dropout_str))
+    if eigorders==10: name = 'fgconv_fgconv_fc_softmax'
     params = gcnn_common.copy()
     params['dir_name'] += name
     params['filter'] = 'fourier'
     ###adjust settings for fourier filters
     params['F'] = [32,32,32,32,32,32] #[32,32,64,64,128,128] #[32 * math.pow(2, li) for li in# range(layers)]  # [32, 64, 128]  # Number of graph convolutional filters.
     params['p'] = [1,1,1,1,1,1] #[1,4,1,4,1,4] #[4,1,4,1,4,1] #[pool_size for li in range(layers)]  # [4, 4, 4]  # Pooling sizes.
-    params['K'] = [eigorders,eigorders,eigorders,eigorders,eigorders,eigorders]
     params['M'] = [gcnn_common['M'][0] * 2, ] + gcnn_common['M']
 
-    '''
-    params['K'] = np.zeros(len(params['p']), dtype=int)
-    gcn_node_shapes = [Laplacian_list[li].shape[0] for li in range(len(Laplacian_list))]
-    params['K'][0] = int(gcn_node_shapes[0] * (1-dropout_lambda))
-    step = 0
-    for pi, li in zip(params['p'], range(len(params['p'])-1)):
-        if pi == 2:
-            params['K'][li+1] = int(gcn_node_shapes[step+1] * (1-dropout_lambda))
-            step += 1
-        elif pi == 4:
-            params['K'][li+1] = int(gcn_node_shapes[step+2] * (1-dropout_lambda))
-            step += 2
-        elif pi == 1:
-            params['K'][li+1] = params['K'][li]
-    print(params['K'])
-    '''
-    print(params)
+    if not eigorders:
+        params['K'] = np.zeros(len(params['p']), dtype=int)
+        gcn_node_shapes = [Laplacian_list[li].shape[0] for li in range(len(Laplacian_list))]
+        params['K'][0] = int(gcn_node_shapes[0] * (1-dropout_lambda))
+        step = 0
+        for pi, li in zip(params['p'], range(len(params['p'])-1)):
+            if pi == 2:
+                params['K'][li+1] = int(gcn_node_shapes[step+1] * (1-dropout_lambda))
+                step += 1
+            elif pi == 4:
+                params['K'][li+1] = int(gcn_node_shapes[step+2] * (1-dropout_lambda))
+                step += 2
+            elif pi == 1:
+                params['K'][li+1] = params['K'][li]
+        print(params['K'])
+    else:
+        params['K'] = [eigorders, eigorders, eigorders, eigorders, eigorders, eigorders]
 
     model = models.cgcnn(config_TF, Laplacian_list, **params)
 
@@ -254,8 +255,9 @@ def build_chebyshev_graph_cnn(gcnn_common, Laplacian_list=None, Korder=5, flag_f
         print([Laplacian_list[li].shape for li in range(len(Laplacian_list))])
 
     ##model#3: two convolutional layers with Chebyshev polynomial as filters
-    name = 'cgconv_cgconv_fc_softmax'  # 'Non-Param'
-    if flag_firstorder:  name += '_firstorder'
+    name = 'cgconv_cgconv_fc_softmax' + '_K'+str(Korder) # 'Non-Param'
+    if flag_firstorder:  name = 'cgconv_cgconv_fc_softmax' + '_firstorder'
+    if Korder==10: name = 'cgconv_cgconv_fc_softmax'
     params = gcnn_common.copy()
     params['dir_name'] += name
     params['filter'] = 'chebyshev5'

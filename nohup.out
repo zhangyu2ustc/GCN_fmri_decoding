@@ -1,0 +1,3 @@
+63678 pts/0    00:32:58 python3
+63694 pts/0    00:00:00 python3
+tensorflow_gcn.sh: line 18: 63678 Terminated              python3 -W ignore ./training.py --block_dura=${blocks} --task_modality=${mod} > ./train_logs/${mod}_block${blocks}_gcn.log 2>&1
